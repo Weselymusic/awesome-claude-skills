@@ -3,7 +3,8 @@
 This script evaluates MCP servers by running test questions against them using Claude.
 
 Modified from the anthropics/skills original (commit 2c5958e): default model
-changed from the retired claude-3-7-sonnet-20250219 to claude-sonnet-5-5.
+changed from the retired claude-3-7-sonnet-20250219 to claude-sonnet-5-5, and
+the agent loop now answers every tool call in a response, not just the first.
 """
 
 import argparse
@@ -110,32 +111,37 @@ async def agent_loop(
     tool_metrics = {}
 
     while response.stop_reason == "tool_use":
-        tool_use = next(block for block in response.content if block.type == "tool_use")
-        tool_name = tool_use.name
-        tool_input = tool_use.input
+        # The model may request several tools in one response. Every tool_use
+        # block needs a matching tool_result, all in a single user message.
+        tool_results = []
+        for tool_use in (block for block in response.content if block.type == "tool_use"):
+            tool_name = tool_use.name
+            tool_input = tool_use.input
 
-        tool_start_ts = time.time()
-        try:
-            tool_result = await connection.call_tool(tool_name, tool_input)
-            tool_response = json.dumps(tool_result) if isinstance(tool_result, (dict, list)) else str(tool_result)
-        except Exception as e:
-            tool_response = f"Error executing tool {tool_name}: {str(e)}\n"
-            tool_response += traceback.format_exc()
-        tool_duration = time.time() - tool_start_ts
+            tool_start_ts = time.time()
+            is_error = False
+            try:
+                tool_result = await connection.call_tool(tool_name, tool_input)
+                tool_response = json.dumps(tool_result) if isinstance(tool_result, (dict, list)) else str(tool_result)
+            except Exception as e:
+                is_error = True
+                tool_response = f"Error executing tool {tool_name}: {str(e)}\n"
+                tool_response += traceback.format_exc()
+            tool_duration = time.time() - tool_start_ts
 
-        if tool_name not in tool_metrics:
-            tool_metrics[tool_name] = {"count": 0, "durations": []}
-        tool_metrics[tool_name]["count"] += 1
-        tool_metrics[tool_name]["durations"].append(tool_duration)
+            if tool_name not in tool_metrics:
+                tool_metrics[tool_name] = {"count": 0, "durations": []}
+            tool_metrics[tool_name]["count"] += 1
+            tool_metrics[tool_name]["durations"].append(tool_duration)
 
-        messages.append({
-            "role": "user",
-            "content": [{
+            tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": tool_use.id,
                 "content": tool_response,
-            }]
-        })
+                "is_error": is_error,
+            })
+
+        messages.append({"role": "user", "content": tool_results})
 
         response = await asyncio.to_thread(
             client.messages.create,
