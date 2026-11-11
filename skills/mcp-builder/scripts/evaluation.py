@@ -2,9 +2,11 @@
 
 This script evaluates MCP servers by running test questions against them using Claude.
 
-Modified from the anthropics/skills original (commit 2c5958e): default model
-changed from the retired claude-3-7-sonnet-20250219 to claude-sonnet-5-5, and
-the agent loop now answers every tool call in a response, not just the first.
+Modified from the anthropics/skills original (commit 2c5958e):
+- default model changed from the retired claude-3-7-sonnet-20250219 to
+  claude-sonnet-5-5
+- the agent loop answers every tool call in a response, not just the first
+- max_tokens raised from 4096 to 16000
 """
 
 import argparse
@@ -100,7 +102,7 @@ async def agent_loop(
     response = await asyncio.to_thread(
         client.messages.create,
         model=model,
-        max_tokens=4096,
+        max_tokens=16000,
         system=EVALUATION_PROMPT,
         messages=messages,
         tools=tools,
@@ -146,7 +148,7 @@ async def agent_loop(
         response = await asyncio.to_thread(
             client.messages.create,
             model=model,
-            max_tokens=4096,
+            max_tokens=16000,
             system=EVALUATION_PROMPT,
             messages=messages,
             tools=tools,
